@@ -2,6 +2,12 @@
 #include <opencv2/highgui.hpp>
 #include <iostream>
 
+#define MINIMUM_CONTOUR_SIZE 100
+#define MARGIN 50
+#define H_MARGIN 25
+#define S_MARGIN 25
+#define V_MARGIN 25
+
 const int max_value_hue = 360/2;
 const int max_value = 255;
 
@@ -76,15 +82,60 @@ int main( int argc, char** argv ) {
     cv::Mat inRange_image;
     cv::Mat croppedImage;
     cv::Rect2d rec_roi;
-    do {
-        cv::Mat frame;
+    cv::Mat frame;
+    cv::Mat contour_mask;
+    cv::Scalar contour_mean;
+
+    double H_mean = 0.0;
+    double S_mean = 0.0;
+    double V_mean = 0.0;
+
+    do {    
         if ( cap.read( frame ) ) {
             cv::resize(frame, frame, cv::Size(width, height), cv::INTER_LINEAR);
             cv::flip(frame, frame, 1);
             GaussianBlur(frame, image_blurred, cv::Size(5, 5), 0);
             cv::cvtColor(image_blurred, image_blurred, cv::COLOR_BGR2HSV);
             cv::inRange(image_blurred, cv::Scalar(low_hue, low_saturation, low_value), cv::Scalar(high_hue, high_saturation, high_value), inRange_image);
-            cv::imshow("HSV_image", image_blurred);
+            cv::erode(inRange_image, inRange_image, cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5, 5)));//morphological opening for removing small objects from foreground//
+            cv::dilate(inRange_image, inRange_image, cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5, 5)));//morphological opening for removing small object from foreground//
+            cv::dilate(inRange_image, inRange_image, cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5, 5)));//morphological closing for filling up small holes in foreground//
+            cv::erode(inRange_image, inRange_image, cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5, 5)));//morphological closing for filling up small holes in foreground//
+
+            int number_of_non_zero_pixels = cv::countNonZero(inRange_image);
+            std::vector<std::vector<cv::Point>> contours;
+            std::vector<float> contoursCentroids;
+            cv::findContours(inRange_image.clone(), contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE); //detekcja konturów
+            std::sort(contours.begin(), contours.end(), [&](auto ctn1, auto ctn2) { return cv::contourArea(ctn1) > cv::contourArea(ctn2);});
+            std::vector<cv::Moments> mu(contours.size());
+            std::vector<cv::Point2f> mc(contours.size());
+
+            for(int i=0; i<contours.size(); ++i)
+            {
+                if(cv::contourArea(contours[i]) < MINIMUM_CONTOUR_SIZE)
+                {
+                    continue;
+                } 
+                else
+                {
+                    mu[i] = cv::moments(contours[i],false); 
+                    mc[i] = cv::Point2f( mu[i].m10/mu[i].m00 , mu[i].m01/mu[i].m00 );
+
+                    // drawing a bouncing box around the contour
+                    cv::Rect box = cv::boundingRect(contours[i]);
+                    cv::rectangle(frame, box, cv::Scalar(19, 252, 3), 5);
+                }
+            }
+            if(contours.size()>=2)
+            {
+                auto p1 = mc[0];
+                auto p2 = mc[1];
+                if(p1.y-MARGIN < p2.y && p1.y + MARGIN > p2.y)
+                { //connect two biggest objects with line if they are on the same level
+                    cv::line(frame, p1, p2, cv::Scalar(19, 252, 3));
+                }
+            }
+            cv::imshow("original_image", frame);
             cv::imshow("inRange_output", inRange_image);
         } else {
             // stream finished
@@ -101,6 +152,22 @@ int main( int argc, char** argv ) {
                 rec_roi = cv::selectROI(inRange_image);
 	            croppedImage = inRange_image(rec_roi);
                 cv::imwrite("../image.jpg", croppedImage);
+                break;
+            case(100): //d - detect (color from ROI select)
+                rec_roi = cv::selectROI(frame);
+                croppedImage = frame(rec_roi);
+                //contour_mask = cv::Mat::zeros(croppedImage.size(), CV_8UC1);
+                cv::cvtColor(croppedImage, croppedImage, cv::COLOR_BGR2HSV);
+                contour_mean = cv::mean(croppedImage);
+                H_mean = contour_mean[0];
+                S_mean = contour_mean[1];
+                V_mean = contour_mean[2];
+                low_hue =  H_mean - H_MARGIN;
+                //high_hue = H_mean + H_MARGIN;
+                low_saturation = S_mean - S_MARGIN;
+                //high_saturation = S_mean + S_MARGIN;
+                low_value = V_mean - V_MARGIN;
+                //high_value = V_mean + V_MARGIN;
                 break;
             default:
                 break;
