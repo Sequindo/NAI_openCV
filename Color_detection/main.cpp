@@ -51,6 +51,11 @@ static void on_high_value_trackbar(int, void *)
     cv::setTrackbarPos("High Value", "HSV_sliders", high_value);
 }
 
+void detectAndDisplay(cv::Mat frame)
+{
+
+}
+
 int main( int argc, char** argv ) {
     int width = 320;
     int height = 200;
